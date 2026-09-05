@@ -10,6 +10,7 @@ import {
 } from '@invoice-saas/types';
 import { validateBody } from '../middleware/validate';
 import { authenticate } from '../middleware/authenticate';
+import { rateLimitByEmailAndIp } from '../middleware/rate-limit';
 import { signup } from '../services/auth/signup';
 import { login } from '../services/auth/login';
 import { refresh } from '../services/auth/refresh';
@@ -22,7 +23,7 @@ export const authRouter: RouterType = Router();
 // Routes are thin: parse/validate, call one service function, shape the
 // response — no business logic here (rules/backend-api.md).
 
-authRouter.post('/signup', validateBody(signupSchema), async (req, res, next) => {
+authRouter.post('/signup', rateLimitByEmailAndIp('signup', 5, 60 * 60), validateBody(signupSchema), async (req, res, next) => {
   try {
     const result = await signup(db, req.body);
     res.status(201).json({ data: result });
@@ -31,7 +32,7 @@ authRouter.post('/signup', validateBody(signupSchema), async (req, res, next) =>
   }
 });
 
-authRouter.post('/login', validateBody(loginSchema), async (req, res, next) => {
+authRouter.post('/login', rateLimitByEmailAndIp('login', 10, 15 * 60), validateBody(loginSchema), async (req, res, next) => {
   try {
     const result = await login(db, req.body);
     res.json({ data: result });
@@ -77,7 +78,7 @@ authRouter.get('/verify-email', async (req, res, next) => {
   }
 });
 
-authRouter.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, res, next) => {
+authRouter.post('/forgot-password', rateLimitByEmailAndIp('forgot-password', 5, 60 * 60), validateBody(forgotPasswordSchema), async (req, res, next) => {
   try {
     await forgotPassword(db, req.body.email);
     res.status(204).send(); // always 204 — no account enumeration

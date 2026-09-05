@@ -169,3 +169,8 @@ export const invoiceEvents = pgTable(
   },
   (t) => [index('invoice_events_workspace_id_idx').on(t.workspaceId), index('invoice_events_invoice_id_idx').on(t.invoiceId)],
 );
+
+export type Client = typeof clients.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoiceItem = typeof invoiceItems.$inferSelect;
+export type Payment = typeof payments.$inferSelect;

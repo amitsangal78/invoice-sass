@@ -7,6 +7,8 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_PEPPER: z.string().min(16), // mixed into refresh-token hashing, not the JWT itself (refresh tokens are opaque, not JWTs)
   PORT: z.coerce.number().default(4000),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(1).default('test-razorpay-webhook-secret'),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).default('test-stripe-webhook-secret'),
 });
 
 export type Env = z.infer<typeof envSchema>;

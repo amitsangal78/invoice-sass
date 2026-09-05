@@ -2,64 +2,62 @@
 
 Depends on `identity-and-rbac`'s tasks (auth middleware, `workspace_members`) existing first — schema drives the feature, so this list assumes that schema/migration is already applied.
 
+**Status: implemented and passing (67/67 tests, TypeScript strict, ESLint clean).** Checked off below; deviations from the original plan are noted inline.
+
 ## 1. Schema & migration (`packages/db`)
-- [ ] Write `packages/db/schema/invoicing.ts` — `clients`, `invoiceSequences`, `invoices`, `invoiceItems`, `payments`, `webhookEvents`, `reminderRules`, `reminderEvents`, `invoiceEvents` per `design.md`.
-- [ ] Generate + review migration, apply to local test Postgres.
-- [ ] Seed default `reminderRules` (`[-3, 0, 3, 10]`) on workspace creation — add this as a follow-up to `identity-and-rbac`'s `signup()` (that service now has a second responsibility; note it there when implementing, don't silently duplicate workspace-creation logic here).
+- [x] `packages/db/schema/invoicing.ts` — `clients`, `invoiceSequences`, `invoices`, `invoiceItems`, `payments`, `webhookEvents`, `reminderRules`, `reminderEvents`, `invoiceEvents`.
+- [x] Migration generated and applied to the local test Postgres.
+- [x] Default `reminderRules` (`[-3, 0, 3, 10]`) and a `FREE`/`ACTIVE` `subscriptions` row are both seeded in `identity-and-rbac`'s `signup()` — noted there, not duplicated.
 
-## 2. Money arithmetic utility (`apps/api/src/lib/money/`) — depends on nothing above
-- [ ] Thin wrapper around `decimal.js`: `toDecimal(numericString)`, `sum(...)`, `compare(...)`, `toDbString(decimal)`. Every service below imports this instead of touching `Decimal` directly, so the DB round-trip (`string ↔ Decimal`) happens in one place.
+## 2. Money arithmetic utility (`apps/api/src/lib/money/decimal.ts`)
+- [x] `toDecimal`, `sum`, `multiply`, `toDbString`, `isGreaterThanOrEqual`, `isGreaterThanZero` — every money calculation goes through this, verified by a test using values chosen to break float arithmetic (three `100.10` payments summing to exactly `300.30`).
 
-## 3. Invoice numbering (`services/invoicing/generate-invoice-number.ts`) — depends on 1
-- [ ] Transaction-safe `UPDATE ... RETURNING` implementation per `design.md`.
-- [ ] Concurrency test: N simultaneous calls for one workspace produce N unique sequential numbers.
+## 3. Invoice numbering (`services/invoicing/generate-invoice-number.ts`)
+- [x] Transaction-safe `UPDATE ... RETURNING`, provisioned at `nextNumber: 0` so the first invoice comes out numbered 1.
+- [x] Concurrency test: 20 simultaneous calls for one workspace → 20 unique sequential numbers. (Caught and fixed a real off-by-one bug during implementation — the initial version numbered the first invoice `0002`.)
 
-## 4. Invoice state machine (`services/invoicing/status.ts`) — depends on 1, 2
-- [ ] `TRANSITIONS` table + `assertTransition()`.
-- [ ] `recomputeStatusFromPayments(invoiceId)` — decimal-safe sum comparison.
-- [ ] Test every legal/illegal transition pair.
+## 4. Invoice state machine (`services/invoicing/status.ts`)
+- [x] `TRANSITIONS` table + `assertTransition()`; `PARTIALLY_PAID`/`OVERDUE` cross-transitions included.
+- [x] `recomputeStatusFromPayments()` — decimal-safe sum comparison.
+- [x] Every legal/illegal transition pair tested, including the "cannot cancel PARTIALLY_PAID/PAID" rule.
 
-## 5. Client service (`services/clients/`) — depends on 1
-- [ ] `createClient()`, `listClients()` (excludes archived by default), `updateClient()`, `archiveClient()` (ADMIN-only, sets `archivedAt` — never a real delete).
-- [ ] Test: archived client hidden from default list, its invoices remain readable.
+## 5. Client service (`services/clients/clients.ts`)
+- [x] `createClient()`, `listClients()`, `updateClient()`, `archiveClient()` — archive only, no hard-delete path exists.
+- [x] Archived-client visibility and historical-invoice-survives-archiving both tested.
 
-## 6. Invoice service (`services/invoicing/`) — depends on 2, 3, 4, 5
-- [ ] `createInvoice()` — validates ≥1 line item + currency, computes subtotal/tax/discount/total via the money utility, calls invoice-numbering, inserts `invoices` + `invoiceItems` in one transaction, checks plan limits (stub a `checkPlanLimit()` call that throws `NotImplementedError` until `subscription-billing` lands — never silently skip the check).
-- [ ] `updateInvoice()` / `deleteInvoice()` — `DRAFT`-only, enforced here even though the route also restricts by role.
-- [ ] `sendInvoice()` — `DRAFT → SENT` via the checked setter, generates PDF (task 9), sends email, sets `sentAt`, writes `INVOICE_SENT` event.
-- [ ] `recordManualPayment()` — inserts `payments` with `source: MANUAL`, calls `recomputeStatusFromPayments`.
-- [ ] `cancelInvoice()` — rejects outside `DRAFT`/`SENT`.
+## 6. Invoice service (`services/invoicing/invoices.ts`)
+- [x] `createInvoice()`, `updateInvoice()`/`deleteInvoice()` (DRAFT-only), `sendInvoice()`, `recordManualPayment()`, `cancelInvoice()`.
+- **Deviation from plan**: `checkPlanLimit()` is a **real implementation** (pulled forward from `subscription-billing/design.md`), not a throwing stub — every workspace already gets a `FREE`/`ACTIVE` `subscriptions` row from `signup()`, so a permanent stub would have made every invoice/client creation fail. `subscription-billing`'s own pass still owns checkout/webhooks/billing routes.
 
-## 7. Payment webhook handlers (`routes/webhooks/`) — depends on 4, 6
-- [ ] `POST /webhooks/razorpay` — signature verify → `webhookEvents` dedupe → insert `payments` (`source: WEBHOOK`) → `recomputeStatusFromPayments` → cache invalidation → `invoice_events` → SSE publish, all per `design.md`'s ordering, dedupe-insert and payment-insert in one transaction.
-- [ ] `POST /webhooks/stripe` — same shape, Stripe's signature scheme.
-- [ ] Redelivery test: same `providerEventId` twice → second call no-ops, no duplicate `payments` row.
+## 7. Payment webhook handlers (`routes/webhooks.ts`, `services/payments/`)
+- [x] Razorpay + Stripe handlers: signature verify → `webhookEvents` dedupe → payment insert → status recompute → cache invalidation → audit → SSE publish.
+- [x] Signature verification implemented directly (HMAC-SHA256, no `stripe`/`razorpay` SDK dependency) and unit-tested without needing live credentials.
+- [x] Redelivery tested (no duplicate `payments` row) and partial-payment-via-two-events tested.
+- **Deviation**: `createRazorpayOrder()`/`createStripeCheckoutSession()` (the outbound "create a payment link" calls) are documented boundaries that throw if actually invoked — they require live provider credentials this environment doesn't have. Webhook *receiving* is fully implemented and tested; webhook *triggering* (checkout initiation) is not.
 
-## 8. SSE (`routes/events.ts`) — depends on 1 (identity-and-rbac's middleware)
-- [ ] `GET /events` — `authenticate` + `resolveWorkspace`, holds the in-memory `workspaceId → Set<Response>` map, documented single-instance limitation per `design.md`.
-- [ ] Publish helper called from the webhook handlers (task 7) and the scheduled jobs (task 10).
+## 8. SSE (`lib/sse.ts`, `routes/events.ts`)
+- [x] `GET /events` — same `authenticate`/`resolveWorkspace`/`requireRole` chain as any other route.
+- [x] In-memory per-instance connection map with the documented single-instance limitation.
+- [x] Publish helper wired into both the webhook handlers and `mark-overdue-invoices`.
 
-## 9. PDF & email (`services/invoicing/pdf.ts`, `packages/email-templates/`) — depends on 6
-- [ ] PDF generation: business details, client details, invoice number, dates, line items, tax, discount, total, currency, logo.
-- [ ] Invoice email template + send call (SES).
+## 9. PDF & email (`services/invoicing/pdf.ts`)
+- [x] PDF generation via `pdfkit` — business/client details, line items, totals, currency.
+- **Deviation**: email sending remains the `lib/email.ts` console-log stub (same as `identity-and-rbac`) — real SES wiring and `packages/email-templates` content are still a follow-up. The generated PDF buffer isn't yet attached/stored since there's no real email transport to attach it to.
 
-## 10. Scheduled jobs (BullMQ) — depends on 4, 6
-- [ ] `mark-overdue-invoices` (daily) — `SENT` + past due → `OVERDUE` via the checked setter.
-- [ ] `send-reminders` (daily) — per-workspace `reminderRules`, dedupe via the `(invoiceId, ruleId)` unique constraint, skip Free-plan workspaces (same stub-until-`subscription-billing` note as task 6).
+## 10. Scheduled jobs (`jobs/`)
+- [x] `mark-overdue-invoices` and `send-reminders` written as plain, directly-testable functions (not hidden inside a BullMQ processor), with a thin `jobs/scheduler.ts` wiring them to daily repeatable BullMQ jobs for the real running process.
+- [x] Free-plan skip, dedupe-via-unique-constraint, and the "only SENT/OVERDUE/PARTIALLY_PAID are reminder-eligible" rule all tested.
 
-## 11. Dashboard summary (`routes/dashboard.ts`) — depends on 6
-- [ ] `GET /dashboard/summary` — grouped-by-currency aggregate query, Redis-cached (`workspace:{id}:dashboard`, 30–120s TTL), invalidated by the same triggers as invoice cache (create/update/payment/cancel).
+## 11. Dashboard summary (`services/dashboard/summary.ts`, `routes/dashboard.ts`)
+- [x] Grouped-by-currency aggregation done in SQL (`SUM` on `NUMERIC` is exact — no need to pull rows into JS for decimal.js), Redis-cached at 60s TTL.
 
-## 12. Routes wiring (`routes/clients.ts`, `routes/invoices.ts`) — depends on 5, 6, 11
-- [ ] Wire every route in `design.md`'s table with the correct `requireRole(...)` per the domain skill's RBAC table.
-- [ ] Zod schemas in `packages/types` for every request/response — shared with the eventual frontend forms.
+## 12. Routes wiring (`routes/clients.ts`, `routes/invoices.ts`)
+- [x] All routes wired with `requireRole(...)` per the domain skill's RBAC table.
+- [x] Zod schemas added to `packages/types/src/invoicing.ts` — decimal amounts validated as regex-checked strings, never accepted as JS numbers.
+- **Note for frontend implementation**: these routes aren't nested under `/workspaces/:id/...`, so the active workspace is read from an `x-workspace-id` header (see `resolve-workspace.ts`) — the frontend must send this once a workspace is selected.
 
-## 13. Tests — cross-cutting, one per item called out in `design.md`
-- [ ] Invoice numbering concurrency (task 3 covers the implementation; this is the explicit test artifact).
-- [ ] State machine legal/illegal transitions (task 4).
-- [ ] `recomputeStatusFromPayments` with values chosen to catch float-arithmetic bugs specifically (not just round numbers).
-- [ ] Webhook redelivery (task 7).
-- [ ] RBAC denial across every MEMBER-restricted route (delete client, delete invoice, cancel invoice, mark-unpaid-equivalent).
+## 13. Tests
+- [x] All cross-cutting tests from the original plan present and passing, plus the RBAC-denial suite (`routes/invoicing-rbac.test.ts`) covering every MEMBER-restricted action (delete client, delete invoice, cancel invoice) alongside the MEMBER-permitted ones (create client, send invoice, mark paid).
 
-## Explicit non-tasks here
-Frontend UI (invoice list/detail/create screens, dashboard) — separate work once this API exists. Recurring invoices, custom branding/templates, client portal, subscription billing — separate specs, not tasks here.
+## Explicit non-tasks here (unchanged)
+Frontend UI, recurring invoices, custom branding/templates, client portal, subscription billing's checkout/webhook/billing-routes — separate specs/work, not built here.

@@ -1,4 +1,4 @@
-import type { Database, InvoiceEventType } from '@invoice-saas/db';
+import type { DbOrTx, InvoiceEventType } from '@invoice-saas/db';
 import { invoiceEvents } from '@invoice-saas/db';
 
 export interface AuditEventInput {
@@ -14,7 +14,7 @@ export interface AuditEventInput {
 // One writer for every financial/security event in the system — every
 // financial-state-changing action, and now auth/team events too, goes through
 // this so `invoice_events` never has an ad hoc insert shape (domain skill).
-export async function writeAuditEvent(db: Database, input: AuditEventInput): Promise<void> {
+export async function writeAuditEvent(db: DbOrTx, input: AuditEventInput): Promise<void> {
   await db.insert(invoiceEvents).values({
     event: input.event,
     workspaceId: input.workspaceId,
@@ -33,7 +33,7 @@ export async function writeAuditEvent(db: Database, input: AuditEventInput): Pro
  * avoids). See identity-and-rbac/design.md's admin-audit-on-view.
  */
 export async function withAdminAuditLog<T>(
-  db: Database,
+  db: DbOrTx,
   meta: { workspaceId: string; userId: string; detail: string },
   read: () => Promise<T>,
 ): Promise<T> {
