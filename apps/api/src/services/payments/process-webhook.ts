@@ -4,6 +4,7 @@ import { recomputeStatusFromPayments } from '../invoicing/status';
 import { invalidateCache } from '../../lib/redis';
 import { writeAuditEvent } from '../../lib/audit';
 import { publishWorkspaceEvent } from '../../lib/sse';
+import { generateReceiptForPayment } from '../invoicing/receipts';
 import { ApiHttpError } from '../../lib/errors';
 
 export interface WebhookPaymentInput {
@@ -33,10 +34,16 @@ export async function processPaymentWebhook(input: WebhookPaymentInput): Promise
   const invoice = await db.query.invoices.findFirst({ where: eq(invoices.id, input.invoiceId) });
   if (!invoice) throw new ApiHttpError(404, 'invoice_not_found', 'Webhook referenced an unknown invoice.');
 
-  await db.transaction(async (tx) => {
+  const paymentId = await db.transaction(async (tx) => {
     await tx.insert(webhookEvents).values({ providerEventId: input.providerEventId, provider: input.provider, eventType: input.eventType });
-    await tx.insert(payments).values({ invoiceId: input.invoiceId, amount: input.amount, source: 'WEBHOOK', providerReference: input.providerEventId });
+    const [payment] = await tx
+      .insert(payments)
+      .values({ invoiceId: input.invoiceId, amount: input.amount, source: 'WEBHOOK', providerReference: input.providerEventId })
+      .returning();
+    if (!payment) throw new Error('Payment insert returned no row');
+    return payment.id;
   });
+  await generateReceiptForPayment(paymentId); // once, at confirmation time — see client-portal/design.md
 
   const newStatus = await recomputeStatusFromPayments(db, input.invoiceId);
 

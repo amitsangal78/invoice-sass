@@ -1,5 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { db, clients } from '@invoice-saas/db';
+import { db, clients, clientUsers } from '@invoice-saas/db';
 import { checkPlanLimit } from '../subscriptions/check-plan-limit';
 import { ApiHttpError } from '../../lib/errors';
 
@@ -9,10 +9,24 @@ export interface CreateClientInput {
   billingAddress?: string;
 }
 
+/**
+ * Every client automatically gets portal access — there's no separate
+ * "invite to portal" step (client-portal/requirements.md story 1 assumes an
+ * invoice email always includes a portal link). `client_users.email` is
+ * denormalized at creation time and deliberately NOT kept in sync with later
+ * `clients.email` edits made by the workspace side — see
+ * client-portal/design.md: an existing portal login shouldn't silently move
+ * to a different inbox because the workspace corrected a contact email. The
+ * client's own portal profile update is the one path allowed to change it.
+ */
 export async function createClient(workspaceId: string, input: CreateClientInput) {
   await checkPlanLimit(workspaceId, 'create_client');
-  const [client] = await db.insert(clients).values({ workspaceId, ...input }).returning();
-  return client;
+  return db.transaction(async (tx) => {
+    const [client] = await tx.insert(clients).values({ workspaceId, ...input }).returning();
+    if (!client) throw new Error('Client insert returned no row');
+    await tx.insert(clientUsers).values({ clientId: client.id, email: input.email });
+    return client;
+  });
 }
 
 export async function listClients(workspaceId: string, includeArchived: boolean) {

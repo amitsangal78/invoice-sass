@@ -9,8 +9,12 @@ import { adminRouter } from './routes/admin';
 import { clientsRouter } from './routes/clients';
 import { invoicesRouter } from './routes/invoices';
 import { webhooksRouter } from './routes/webhooks';
+import { subscriptionWebhooksRouter } from './routes/subscription-webhooks';
 import { eventsRouter } from './routes/events';
 import { dashboardRouter } from './routes/dashboard';
+import { portalAuthRouter } from './routes/portal-auth';
+import { portalRouter } from './routes/portal';
+import { billingRouter } from './routes/billing';
 import { errorHandler } from './middleware/error-handler';
 
 // Versioned under /api/v1 from the start — three independent clients (web,
@@ -27,6 +31,9 @@ export function createApp(): Express {
   // Webhooks need the RAW body for signature verification — mounted before
   // express.json() so the body arrives as a Buffer, not pre-parsed JSON.
   app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }), webhooksRouter);
+  // Structurally separate router/path from the invoice-payment webhooks above
+  // — see subscription-billing/design.md.
+  app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }), subscriptionWebhooksRouter);
 
   app.use(express.json());
 
@@ -38,6 +45,9 @@ export function createApp(): Express {
   app.use('/api/v1/invoices', invoicesRouter);
   app.use('/api/v1/events', eventsRouter);
   app.use('/api/v1/dashboard', dashboardRouter);
+  app.use('/api/v1/portal-auth', portalAuthRouter);
+  app.use('/api/v1/portal', portalRouter);
+  app.use('/api/v1/billing', billingRouter);
 
   // Must be registered last.
   app.use(errorHandler);

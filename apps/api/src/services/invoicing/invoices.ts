@@ -8,6 +8,7 @@ import { writeAuditEvent } from '../../lib/audit';
 import { invalidateCache } from '../../lib/redis';
 import { sendEmail } from '../../lib/email';
 import { generateInvoicePdf } from './pdf';
+import { generateReceiptForPayment } from './receipts';
 import { ApiHttpError } from '../../lib/errors';
 
 export interface InvoiceLineItemInput {
@@ -133,9 +134,9 @@ export async function sendInvoice(workspaceId: string, invoiceId: string) {
 export async function recordManualPayment(workspaceId: string, invoiceId: string, amount: string, recordedBy: string) {
   await assertInvoiceInWorkspace(workspaceId, invoiceId);
 
-  await db.transaction(async (tx) => {
-    await tx.insert(payments).values({ invoiceId, amount, source: 'MANUAL', recordedBy });
-  });
+  const [payment] = await db.insert(payments).values({ invoiceId, amount, source: 'MANUAL', recordedBy }).returning();
+  if (!payment) throw new Error('Payment insert returned no row');
+  await generateReceiptForPayment(payment.id); // once, at confirmation time — see client-portal/design.md
 
   const newStatus = await recomputeStatusFromPayments(db, invoiceId);
   await invalidateCache(`workspace:${workspaceId}:invoice:${invoiceId}`);
