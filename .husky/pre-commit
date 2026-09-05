@@ -1,0 +1,9 @@
+# Use the pinned Node version (.nvmrc) regardless of the shell's default —
+# git hooks run non-interactively and won't pick up nvm's shell integration
+# on their own.
+if [ -s "$HOME/.nvm/nvm.sh" ]; then
+  \. "$HOME/.nvm/nvm.sh"
+  nvm use --silent >/dev/null 2>&1 || true
+fi
+
+npx lint-staged

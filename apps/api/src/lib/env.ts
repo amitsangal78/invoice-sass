@@ -1,0 +1,24 @@
+import { z } from 'zod';
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DATABASE_URL: z.string().min(1),
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+  JWT_ACCESS_SECRET: z.string().min(16),
+  JWT_REFRESH_PEPPER: z.string().min(16), // mixed into refresh-token hashing, not the JWT itself (refresh tokens are opaque, not JWTs)
+  PORT: z.coerce.number().default(4000),
+});
+
+export type Env = z.infer<typeof envSchema>;
+
+let cached: Env | undefined;
+
+// Lazily parsed and memoized — never re-read per request. This is configuration,
+// not per-request state, so caching it doesn't violate the no-shared-mutable-
+// globals principle (architecture-principles.md #6).
+export function getEnv(): Env {
+  if (!cached) {
+    cached = envSchema.parse(process.env);
+  }
+  return cached;
+}

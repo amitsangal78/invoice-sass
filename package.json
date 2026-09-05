@@ -1,0 +1,39 @@
+{
+  "name": "invoice-saas",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.9.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2"
+    ]
+  },
+  "scripts": {
+    "prepare": "husky",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "build": "turbo run build",
+    "dev": "turbo run dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "turbo": "^2.3.0",
+    "typescript-eslint": "^8.69.0"
+  },
+  "lint-staged": {
+    "apps/**/*.{ts,tsx}": [
+      "eslint --fix"
+    ],
+    "packages/**/*.{ts,tsx}": [
+      "eslint --fix"
+    ],
+    "*.{ts,tsx}": [
+      "bash -c 'git rev-parse --verify HEAD >/dev/null 2>&1 && pnpm turbo run test --filter=...[HEAD] || pnpm turbo run test'"
+    ]
+  }
+}
