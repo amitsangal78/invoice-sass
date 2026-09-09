@@ -14,6 +14,7 @@ import {
   sendInvoice,
   recordManualPayment,
   cancelInvoice,
+  getInvoicePdf,
 } from '../services/invoicing/invoices';
 
 export const invoicesRouter: RouterType = Router();
@@ -40,6 +41,17 @@ invoicesRouter.get('/', requireRole('ADMIN', 'MEMBER'), async (req, res, next) =
 invoicesRouter.get('/:id', requireRole('ADMIN', 'MEMBER'), async (req, res, next) => {
   try {
     res.json({ data: await getInvoice(req.membership!.workspaceId, requireParam(req, 'id')) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Binary response — the one deliberate exception to the `{ data }` JSON
+// envelope (a PDF can't be wrapped in JSON), see rules/backend-api.md.
+invoicesRouter.get('/:id/pdf', requireRole('ADMIN', 'MEMBER'), async (req, res, next) => {
+  try {
+    const pdf = await getInvoicePdf(req.membership!.workspaceId, requireParam(req, 'id'));
+    res.type('application/pdf').send(pdf);
   } catch (err) {
     next(err);
   }

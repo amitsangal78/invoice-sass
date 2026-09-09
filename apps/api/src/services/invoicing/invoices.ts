@@ -6,10 +6,17 @@ import { setInvoiceStatus, recomputeStatusFromPayments } from './status';
 import { checkPlanLimit } from '../subscriptions/check-plan-limit';
 import { writeAuditEvent } from '../../lib/audit';
 import { invalidateCache } from '../../lib/redis';
+import { cacheAsideLong } from '../../lib/memcache';
 import { sendEmail } from '../../lib/email';
 import { generateInvoicePdf } from './pdf';
 import { generateReceiptForPayment } from './receipts';
 import { ApiHttpError } from '../../lib/errors';
+
+// A finalized invoice's PDF content never changes again — updateInvoice/
+// deleteInvoice below only allow edits while still DRAFT — so 15 days in the
+// Memcached long-cache tier is safe, not just fast. See tech.md's Memcached
+// conventions.
+const PDF_CACHE_TTL_SECONDS = 15 * 24 * 60 * 60;
 
 export interface InvoiceLineItemInput {
   description: string;
@@ -144,6 +151,25 @@ export async function recordManualPayment(workspaceId: string, invoiceId: string
   await writeAuditEvent(db, { event: newStatus === 'PAID' ? 'INVOICE_MARKED_PAID' : 'PAYMENT_RECEIVED', workspaceId, invoiceId, userId: recordedBy, newValue: { amount, source: 'MANUAL' } });
 
   return newStatus;
+}
+
+/** PDF content only depends on line items/tax/discount/total/currency/client
+ * details — none of which change once an invoice leaves DRAFT — so this is
+ * cached long-term rather than regenerated on every download. */
+export async function getInvoicePdf(workspaceId: string, invoiceId: string): Promise<Buffer> {
+  const invoice = await assertInvoiceInWorkspace(workspaceId, invoiceId);
+  if (invoice.status === 'DRAFT') {
+    throw new ApiHttpError(409, 'invoice_not_sent', 'Send the invoice before downloading its PDF.');
+  }
+  const client = await db.query.clients.findFirst({ where: eq(clients.id, invoice.clientId) });
+  if (!client) throw new ApiHttpError(404, 'client_not_found', 'Client not found.');
+
+  const cacheKey = `workspace:${workspaceId}:invoice:${invoiceId}:pdf`;
+  const base64Pdf = await cacheAsideLong(cacheKey, PDF_CACHE_TTL_SECONDS, async () => {
+    const pdf = await generateInvoicePdf({ invoice, client });
+    return pdf.toString('base64');
+  });
+  return Buffer.from(base64Pdf, 'base64');
 }
 
 export async function cancelInvoice(workspaceId: string, invoiceId: string, actingUserId: string) {

@@ -7,7 +7,7 @@ paths:
 # Backend API rules
 
 - Validate every request body and query string with a zod schema from `packages/types`.
-- Response shape is always `{ data: T }` on success or `{ error: { code, message } }` on failure — no route invents its own shape.
+- Response shape is always `{ data: T }` on success or `{ error: { code, message } }` on failure — no route invents its own shape. The one deliberate exception: a binary file response (e.g. `GET /invoices/:id/pdf`) can't be wrapped in JSON — send it directly with the correct `Content-Type`, errors still go through the normal error middleware.
 - Every query touching `clients`, `invoices`, or `invoice_items` filters by `workspace_id`, resolved server-side from the caller's `workspace_members` row — never trust a client-supplied workspace id. No exceptions — a `SUPER_ADMIN`/`SUPPORT_ADMIN` cross-tenant query is a separate, explicitly-named function in `apps/api/src/services/admin/`, never a route that "forgot" the filter.
 - Every route also checks the caller's role has permission for the action (see the RBAC table in `invoice-reminder-saas-domain`), and — for client-portal (`USER`) requests — that the resource belongs to the caller's own `client_id`, not just their workspace.
 - Webhook handlers: verify signature → check `webhook_events` for `provider_event_id` → then mutate state. Never skip the dedupe check, even to "fix it quickly."

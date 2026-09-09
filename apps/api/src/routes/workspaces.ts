@@ -6,6 +6,7 @@ import { resolveWorkspace } from '../middleware/resolve-workspace';
 import { requireRole, requireOwner } from '../middleware/require-role';
 import { validateBody } from '../middleware/validate';
 import { listMembers, changeRole, removeMember } from '../services/workspaces/members';
+import { listMyWorkspaces } from '../services/workspaces/list-my-workspaces';
 import { initiateOwnershipTransfer, confirmOwnershipTransfer } from '../services/workspaces/ownership';
 import { createInvitation, resendInvitation, revokeInvitation } from '../services/invitations/invitations';
 import { requireParam } from '../lib/params';
@@ -13,6 +14,16 @@ import { requireParam } from '../lib/params';
 export const workspacesRouter: RouterType = Router();
 
 workspacesRouter.use(authenticate);
+
+// No resolveWorkspace here — this is precisely the endpoint that lets the
+// frontend discover which workspace id(s) to use for every subsequent call.
+workspacesRouter.get('/mine', async (req, res, next) => {
+  try {
+    res.json({ data: await listMyWorkspaces(req.user!.id) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 workspacesRouter.get('/:id/members', resolveWorkspace, requireRole('ADMIN', 'MEMBER'), async (req, res, next) => {
   try {

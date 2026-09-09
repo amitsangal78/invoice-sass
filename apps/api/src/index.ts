@@ -1,3 +1,4 @@
+import 'dotenv/config'; // loads apps/api/.env — must be the first import so getEnv() below sees it
 import { createApp } from './app';
 import { getEnv } from './lib/env';
 import { registerScheduledJobs } from './jobs/scheduler';
