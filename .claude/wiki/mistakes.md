@@ -50,3 +50,24 @@ Real bugs hit while building this project, each as: what happened → root cause
 **What happened**: a password containing a literal `@` (`welcome@123`) was set directly in a `postgres://user:password@host/db` connection string.
 **What actually happened, checked rather than assumed**: both Node's `URL` parser and the `pg` driver's connection-string parser correctly split on the *last* `@` before the host, so this worked without URL-encoding in practice — but it's fragile and easy to get wrong with a different client library.
 **Avoid next time**: URL-encode special characters in a connection-string password (`@` → `%40`) rather than relying on a parser splitting correctly on the last `@` — verified working here, but don't assume every tool agrees.
+
+## A generated file blocked every commit, and it looked like a test failure
+
+**What happened**: commits were failing, reported as "a test is still failing." The full suite was green — 8/8 turbo tasks, every test passing.
+**Root cause**: the pre-commit hook runs `lint-staged`, which runs **ESLint before the tests**. It failed on `apps/web/next-env.d.ts` — a file Next.js regenerates on every build and explicitly marks "should not be edited." Its triple-slash reference trips `@typescript-eslint/triple-slash-reference`, so linting it produced an error nobody was allowed to fix. It only started biting once `apps/web` had staged TypeScript files.
+**Fix**: added `**/next-env.d.ts` to the ESLint ignores in `eslint.config.mjs`. Separately, `*.config.js` files (babel/postcss) needed a CommonJS + Node-globals block — they were failing `no-undef` on `module`, which is the file's entire contract.
+**Avoid next time**: when a commit fails, read *which* stage failed rather than trusting the summary — lint runs before tests, so "commit blocked" and "test failing" are not the same claim. And never lint generated files: if the fix would be overwritten by the next build, the file belongs in `ignores`.
+
+## `next build` while `next dev` is running corrupts the dev server
+
+**What happened**: the web app started returning 500s on every route — `ENOENT ... .next/server/vendor-chunks/tailwind-merge@2.6.1.js`.
+**Root cause**: `next build` and `next dev` share the `.next` directory. Running a production build while the dev server was live overwrote the chunks the running server had already resolved, leaving it pointing at files that no longer existed.
+**Fix**: stop the dev server, `rm -rf .next`, restart. Nothing in the source was wrong.
+**Avoid next time**: don't run `next build` against a workspace with `next dev` live — verify with the dev server, or stop it first. A sudden 500 on *every* route right after a build is this, not a code change.
+
+## A percentage height with no parent to resolve against
+
+**What happened**: the dashboard's revenue-trend bars rendered as nothing — month labels showed, bars didn't.
+**Root cause**: each bar had `height: {n}%` but its immediate parent was a flex *column* with no definite height. A percentage height resolves against the parent's height; with none, it collapses to zero. The fixed `h-[100px]` was on the grandparent.
+**Fix**: made the bars direct children of the fixed-height row and moved the labels to their own row beneath it.
+**Avoid next time**: a `%` height needs a parent with a *definite* height, not merely an ancestor that has one. If a bar/fill silently doesn't render, check what its immediate parent's height actually resolves to before suspecting the data.

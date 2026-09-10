@@ -23,7 +23,6 @@ graph LR
 
   subgraph Cross-cutting
     redis[lib/redis.ts]
-    memcache[lib/memcache.ts]
     audit[lib/audit.ts]
     db[packages/db]
     types[packages/types]
@@ -50,7 +49,6 @@ graph LR
 
   identity --> redis
   invoicing --> redis
-  invoicing --> memcache
   billing --> redis
   identity --> audit
   invoicing --> audit
@@ -73,12 +71,13 @@ graph LR
 
 ## core-invoicing
 
-- **depends_on**: `identity-and-rbac` (auth middleware, `workspace_members`), `subscription-billing` (`checkPlanLimit` before invoice/client creation), `lib/money/decimal.ts`, `lib/redis.ts` (dashboard/invoice-detail cache), `lib/memcache.ts` (PDF cache), `lib/audit.ts`.
-- **provides_services**: `services/invoicing/{invoices,status,generate-invoice-number,pdf,receipts}.ts`, `services/payments/{process-webhook,providers/{razorpay,stripe}}.ts`.
+- **depends_on**: `identity-and-rbac` (auth middleware, `workspace_members`), `subscription-billing` (`checkPlanLimit` before invoice/client creation), `lib/money/decimal.ts`, `lib/redis.ts` (dashboard, invoice-detail and PDF caches), `lib/audit.ts`.
+- **provides_services**: `services/invoicing/{invoices,status,generate-invoice-number,pdf,receipts}.ts`, `services/payments/{process-webhook,providers/{razorpay,stripe}}.ts`, `services/dashboard/summary.ts`.
 - **exposed_via_routes**: `routes/{clients,invoices,webhooks,dashboard,events}.ts`.
 - **jobs**: `jobs/{mark-overdue-invoices,send-reminders}.ts` (both skip Free-plan workspaces via `subscription-billing`).
-- **consumed_by**: `apps/web` (clients/invoices/dashboard pages, PDF download via its `app/api/invoices/[id]/pdf` proxy route), `apps/mobile` (clients/invoices tabs), `client-portal` (reuses the payment-link creation service, not a duplicate implementation).
-- **gotchas**: see `.claude/wiki/mistakes.md` — invoice numbering provisioning off-by-one.
+- **consumed_by**: `apps/web` (clients/invoices/dashboard pages, PDF download via its `app/api/invoices/[id]/pdf` proxy route), `apps/mobile` (clients/invoices tabs, Home screen), `client-portal` (reuses the payment-link creation service, not a duplicate implementation).
+- **dashboard payload**: `getDashboardSummary()` returns outstanding / paid / paidThisMonth / overdue / dueSoon / revenueTrend / recentPayments in **one** cached response — both the web dashboard and the mobile Home screen read it. `paidThisMonth` and `revenueTrend` come from `payments.paidAt`, not invoice status. Changing this shape touches both frontends.
+- **gotchas**: see `.claude/wiki/mistakes.md` — invoice numbering provisioning off-by-one; every total is grouped by currency and never summed across them.
 
 ## client-portal
 
@@ -98,8 +97,7 @@ graph LR
 
 ## Cross-cutting libs
 
-- **`lib/redis.ts`**: `cacheAside`/`invalidateCache`/`invalidateCachePattern` — short-TTL (hours or less), correctness-sensitive data (permissions, dashboard, plan). Every key is `workspace:{id}:...`-scoped, no exceptions.
-- **`lib/memcache.ts`**: `cacheAsideLong` — long-TTL (up to 15 days), only for content that's immutable once created (currently: finalized invoice PDFs). Same degrade-to-source-of-truth contract as Redis.
+- **`lib/redis.ts`**: `cacheAside`/`invalidateCache`/`invalidateCachePattern` — the only cache in the system. Mostly short-TTL, correctness-sensitive data (permissions, dashboard, plan); long TTLs are allowed only for immutable content (finalized invoice PDFs). Every key is `workspace:{id}:...`-scoped, no exceptions.
 - **`lib/audit.ts`**: `writeAuditEvent`/`withAdminAuditLog` — backs `invoice_events`, used by both `core-invoicing` (financial events) and `identity-and-rbac` (auth/membership events, admin-audit-on-view).
 - **`packages/db`**: the schema is the cross-domain source of truth — `schema/{identity,invoicing,client-portal,subscriptions}.ts`, all re-exported from one index.
 - **`packages/types`**: Zod schemas shared between API validation (`middleware/validate.ts`) and every frontend's forms — never redefined per-app.

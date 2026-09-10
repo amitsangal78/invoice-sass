@@ -19,6 +19,16 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Build-tool config files at app roots (babel.config.js, postcss.config.js)
+    // are CommonJS and run in Node — without this they trip `no-undef` on
+    // `module`, which is the file's whole contract.
+    files: ['**/*.config.js', '**/*.config.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { module: 'writable', require: 'readonly', process: 'readonly', __dirname: 'readonly' },
+    },
+  },
+  {
     files: ['**/*.ts', '**/*.tsx'],
     rules: {
       // rules/code-reviewer.md's non-negotiables: no silent `any`, no unchecked

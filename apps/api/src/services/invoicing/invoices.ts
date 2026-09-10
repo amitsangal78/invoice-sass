@@ -1,21 +1,20 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db, invoices, invoiceItems, payments, clients, type InvoiceStatus } from '@invoice-saas/db';
 import { toDecimal, multiply, sum, toDbString } from '../../lib/money/decimal';
 import { generateInvoiceNumber } from './generate-invoice-number';
 import { setInvoiceStatus, recomputeStatusFromPayments } from './status';
 import { checkPlanLimit } from '../subscriptions/check-plan-limit';
 import { writeAuditEvent } from '../../lib/audit';
-import { invalidateCache } from '../../lib/redis';
-import { cacheAsideLong } from '../../lib/memcache';
+import { cacheAside, invalidateCache } from '../../lib/redis';
 import { sendEmail } from '../../lib/email';
 import { generateInvoicePdf } from './pdf';
 import { generateReceiptForPayment } from './receipts';
 import { ApiHttpError } from '../../lib/errors';
 
 // A finalized invoice's PDF content never changes again — updateInvoice/
-// deleteInvoice below only allow edits while still DRAFT — so 15 days in the
-// Memcached long-cache tier is safe, not just fast. See tech.md's Memcached
-// conventions.
+// deleteInvoice below only allow edits while still DRAFT — so a long TTL here
+// is safe, not just fast. Longer than the usual Redis entries in this codebase
+// precisely because the content is immutable; see tech.md's Redis conventions.
 const PDF_CACHE_TTL_SECONDS = 15 * 24 * 60 * 60;
 
 export interface InvoiceLineItemInput {
@@ -96,8 +95,17 @@ export async function getInvoice(workspaceId: string, invoiceId: string) {
   return assertInvoiceInWorkspace(workspaceId, invoiceId);
 }
 
+/** Joins the client so list views can show a name without an N+1 fetch per
+ * row. Still workspace-scoped on invoices, exactly as before. */
 export async function listInvoices(workspaceId: string) {
-  return db.select().from(invoices).where(eq(invoices.workspaceId, workspaceId));
+  const rows = await db
+    .select({ invoice: invoices, clientName: clients.name })
+    .from(invoices)
+    .innerJoin(clients, eq(clients.id, invoices.clientId))
+    .where(eq(invoices.workspaceId, workspaceId))
+    .orderBy(desc(invoices.createdAt));
+
+  return rows.map((row) => ({ ...row.invoice, clientName: row.clientName }));
 }
 
 export async function updateInvoice(workspaceId: string, invoiceId: string, input: Partial<Pick<CreateInvoiceInput, 'currency' | 'dueDate'>>) {
@@ -165,7 +173,7 @@ export async function getInvoicePdf(workspaceId: string, invoiceId: string): Pro
   if (!client) throw new ApiHttpError(404, 'client_not_found', 'Client not found.');
 
   const cacheKey = `workspace:${workspaceId}:invoice:${invoiceId}:pdf`;
-  const base64Pdf = await cacheAsideLong(cacheKey, PDF_CACHE_TTL_SECONDS, async () => {
+  const base64Pdf = await cacheAside(cacheKey, PDF_CACHE_TTL_SECONDS, async () => {
     const pdf = await generateInvoicePdf({ invoice, client });
     return pdf.toString('base64');
   });

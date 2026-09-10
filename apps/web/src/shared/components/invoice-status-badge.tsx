@@ -5,5 +5,5 @@ import { STATUS_BADGE_CONFIG, type InvoiceStatus } from '@/lib/invoicing/status'
 // detail features. Never color alone: always label + dot (design-system.md).
 export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   const config = STATUS_BADGE_CONFIG[status];
-  return <Badge label={config.label} bg={config.bg} text={config.text} dot={config.dot} />;
+  return <Badge label={config.label} className={config.className} dotClassName={config.dotClassName} />;
 }

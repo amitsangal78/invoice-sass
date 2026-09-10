@@ -12,9 +12,23 @@ export const metadata: Metadata = {
   description: 'Simple invoicing for freelancers, consultants, and small agencies.',
 };
 
+// Runs before first paint so a dark-mode user never sees a flash of the light
+// theme. Can't be a React effect — those run after hydration, i.e. after the
+// browser has already painted.
+const THEME_INIT = `
+try {
+  var stored = localStorage.getItem('billify-theme');
+  var dark = stored ? stored === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  if (dark) document.documentElement.classList.add('dark');
+} catch (e) {}
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+      </head>
       <body className="font-sans antialiased">{children}</body>
     </html>
   );

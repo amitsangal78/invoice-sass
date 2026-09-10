@@ -30,7 +30,11 @@ Primary reference: theme2's board (the "B" monogram mark) — matches the taglin
 | `warning` | `#D97706` | `#F59E0B` | |
 | `danger` | `#DC2626` | `#EF4444` | |
 
-Dark-mode values are a first design pass, not yet used anywhere in the product (dark mode stays a later build priority per the brand brief) — but the tokens exist now so no component ever hardcodes a color that would need hunting down later. Implement as CSS variables (web) and a matching RN theme object (mobile) — see `tech.md`'s theming row.
+**Dark mode is live in `apps/web`.** The dark values above are the ones actually rendering — `globals.css` defines them under `.dark`, an inline script in `app/layout.tsx` stamps the class before first paint (so there's no flash of light theme), and `shared/components/theme-toggle.tsx` flips and persists the choice. Default follows `prefers-color-scheme` until the user chooses.
+
+The rule that makes this work with one implementation instead of two: **a component references tokens, never a literal.** That includes the invoice status badges, which used to hold hardcoded hexes in `lib/invoicing/status.ts` and therefore stayed light pastel pills on a dark surface — they now carry token-based classes (`bg-success/15 text-success`) and follow the theme automatically.
+
+`apps/mobile` is still light-only: its `src/lib/tokens.ts` exports a single palette, and the mobile artboards in the design canvas only specify light. A matching RN theme object is the follow-up if dark is wanted there.
 
 ### Invoice status colors (consistent everywhere — web, mobile, portal, PDF)
 

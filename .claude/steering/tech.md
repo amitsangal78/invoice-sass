@@ -13,7 +13,7 @@ Full scope, built now — no phased infra rollout. One stack decision per surfac
 | Database | Neon PostgreSQL + Drizzle ORM | Relational data with real foreign keys, not document-shaped; Neon for serverless scaling + branching (see below). Drizzle over Prisma: lighter runtime, SQL-shaped queries (matches the "boring and correct" Express stance), first-class Neon serverless driver support. |
 | Authentication | Self-built JWT (access + refresh) | Full control over the signup/verify/reset/session flow; see below for what this makes *us* responsible for |
 | Authorization | Node.js + PostgreSQL (`workspace_members`) | The JWT identifies the user; the app answers "which workspace, what role, what's allowed" — see below |
-| Cache | Redis (ElastiCache) — hours or less; Memcached — up to ~15 days | Two tiers by TTL, not by data type: Redis for anything that can go stale within a day (permissions, dashboard aggregates, rate limiting, idempotency); Memcached for content that's immutable once created (e.g. a finalized invoice's rendered PDF) — see the conventions sections for both |
+| Cache | Redis (ElastiCache) | One cache, not two — workspace/permission/dashboard caching, rate limiting, idempotency keys, and long-TTL entries for immutable content (a finalized invoice's rendered PDF). See the Redis conventions section |
 | Bloom filter | In-process/Redis-backed, selective use only | Negative-lookup optimization for high-volume existence checks (public invoice ids, portal tokens) — never for authorization, see below |
 | State (frontend) | Zustand (client state) + TanStack Query (server state) | Don't duplicate server state into the store |
 | Mobile | React Native (Expo) | Shares `packages/types` with the API; OTA updates without app-store review for most changes |
@@ -68,21 +68,12 @@ Kafka is a deliberate exclusion, not a "not yet" — it earns its place only wit
 
 Redis accelerates reads and backs three mechanisms — it is never the source of truth; Postgres always is. If Redis is unavailable, the app degrades in performance, never in correctness (fall through to Postgres).
 
-- **Caching** — every key includes the workspace id, no exceptions: `workspace:{workspaceId}:settings`, `workspace:{workspaceId}:permissions:{userId}`, `workspace:{workspaceId}:dashboard`, `workspace:{workspaceId}:invoice:{invoiceId}`. A cache key without a workspace scope (`invoice:{id}`) is a tenant-isolation bug, not a style nit. TTLs are set per type and tuned later, not left unset: settings ~10–30 min, dashboard ~30–120 sec, permissions ~5–15 min, invoice detail ~1–5 min.
+- **Caching** — every key includes the workspace id, no exceptions: `workspace:{workspaceId}:settings`, `workspace:{workspaceId}:permissions:{userId}`, `workspace:{workspaceId}:dashboard`, `workspace:{workspaceId}:invoice:{invoiceId}`. A cache key without a workspace scope (`invoice:{id}`) is a tenant-isolation bug, not a style nit. TTLs are set per type and tuned later, not left unset: settings ~10–30 min, dashboard ~30–120 sec, permissions ~5–15 min, invoice detail ~1–5 min. The one deliberate outlier is content that is *immutable once created* — a finalized invoice PDF (`workspace:{workspaceId}:invoice:{invoiceId}:pdf`) is cached for 15 days, which is safe only because an invoice can no longer be edited once it leaves `DRAFT`. A long TTL is justified by immutability, never by "this is expensive to compute".
 - **Invalidation** — after a mutation commits to Postgres, delete/update the affected keys (invoice cache + dashboard cache) in the same request path, not via a lagging background sweep.
 - **Rate limiting** — login attempts, password-reset attempts, public payment-link access, general API abuse control.
 - **Idempotency** — short-lived keys for payment creation and webhook processing, e.g. `idempotency:razorpay:{eventId}`, in addition to (not instead of) the durable `webhook_events` table — Redis catches the fast-path duplicate, Postgres is the permanent record.
 
 Never store in Redis: plain passwords, JWT signing secrets, card data, or anything that must survive a cache eviction as the only copy.
-
-## Memcached conventions
-
-A second cache tier, deliberately separate from Redis rather than just a longer Redis TTL — reserved for content that's genuinely immutable once created, not merely slow-changing. The test is "would it ever be a correctness bug if this were 15 days stale," not "is this expensive to compute." If the answer is yes, it belongs in Redis with a short TTL and an explicit invalidation path instead.
-
-- **What goes here**: a finalized invoice's rendered PDF (`workspace:{workspaceId}:invoice:{invoiceId}:pdf`, `apps/api/src/services/invoicing/invoices.ts`'s `getInvoicePdf`) — line items/tax/discount/total/currency only mutate while `DRAFT`, and edits are blocked once sent, so the rendered bytes never change again for that invoice. Same `workspace:{id}:...` key-scoping rule as Redis applies — no exceptions.
-- **Ceiling**: 15 days. Not a hard technical limit, a deliberate policy ceiling — nothing here should assume permanence; the source of truth (Postgres, or eventually S3 once that's wired for PDF storage — see `product.md`/this file's Infra section) is what a cache miss falls back to.
-- **Degradation**: same contract as Redis — if Memcached is unavailable, `cacheAsideLong` (`lib/memcache.ts`) falls through to regenerating the value, never fails the request.
-- **Relationship to S3**: the long-term plan already lists S3 for invoice PDFs (see Infra below). Memcached is a fast tier in front of that, not a replacement for it — once S3 storage lands, Memcached still saves the regeneration/roundtrip cost on repeat downloads within its TTL.
 
 ## Bloom filter — narrow, deliberate use
 

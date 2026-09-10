@@ -17,6 +17,8 @@ export interface Invoice {
   total: string;
   dueDate: string;
   sentAt: string | null;
+  /** Present on list responses (joined server-side); absent on single-invoice reads. */
+  clientName?: string;
 }
 
 export async function listInvoices(): Promise<Invoice[]> {

@@ -29,9 +29,20 @@ Every status write goes through `setInvoiceStatus`/`assertTransition` — no rou
 
 ## PDF generation & caching
 
-`services/invoicing/pdf.ts`'s `generateInvoicePdf()` renders the PDF (pdfkit) from an invoice + client + its line items. `services/invoicing/invoices.ts`'s `getInvoicePdf(workspaceId, invoiceId)` wraps that: 409s if still `DRAFT`, otherwise cache-asides through Memcached (`lib/memcache.ts`'s `cacheAsideLong`, key `workspace:{workspaceId}:invoice:{invoiceId}:pdf`, 15-day TTL, base64 in/out since Memcached values are opaque bytes/strings). Route: `GET /invoices/:id/pdf` — the one deliberate exception to the `{ data }` JSON envelope (`rules/backend-api.md`), served through `apps/web`'s `app/api/invoices/[id]/pdf/route.ts` proxy so the browser gets it same-origin without the auth token reaching client JS.
+`services/invoicing/pdf.ts`'s `generateInvoicePdf()` renders the PDF (pdfkit) from an invoice + client + its line items. `services/invoicing/invoices.ts`'s `getInvoicePdf(workspaceId, invoiceId)` wraps that: 409s if still `DRAFT`, otherwise cache-asides through Redis (`lib/redis.ts`'s `cacheAside`, key `workspace:{workspaceId}:invoice:{invoiceId}:pdf`, 15-day TTL, base64 in/out). The long TTL is justified by immutability, not by cost. Route: `GET /invoices/:id/pdf` — the one deliberate exception to the `{ data }` JSON envelope (`rules/backend-api.md`), served through `apps/web`'s `app/api/invoices/[id]/pdf/route.ts` proxy so the browser gets it same-origin without the auth token reaching client JS.
 
 **Documented gap**: `core-invoicing/design.md` scopes this route to `ADMIN, MEMBER, and USER (own invoice only)` — the `USER` (client-portal) side isn't implemented yet, only the tenant side. See [client-portal.md](client-portal.md).
+
+## Dashboard aggregates
+
+`services/dashboard/summary.ts`'s `getDashboardSummary()` returns everything the dashboard renders in one payload — they share a single Redis entry (`workspace:{id}:dashboard`, 60s) and a single page consumes them, so splitting them into separate endpoints would just multiply round-trips and cache keys.
+
+- `outstanding` / `paid` / `overdue` / `dueSoon` — invoice totals **grouped by currency, never summed across currencies**. `dueSoon` is `SENT` and falling due within 7 days, deliberately excluding `OVERDUE` (that's its own card).
+- `paidThisMonth` — derived from `payments.paidAt`, **not** from `invoices.status`. An invoice being `PAID` says nothing about *when* the money arrived; using status here would attribute an old payment to the current month.
+- `revenueTrend` — payments bucketed by month for 6 months, per currency. The UI renders only the dominant currency: bars of different currencies can't share a y-axis without implying an exchange rate, and this product has no conversion engine by design.
+- `recentPayments` — joined through `invoices` → `clients` for the client name.
+
+`listInvoices()` also joins `clients` so list views get a name without an N+1 per row. All of it stays workspace-scoped exactly as before; `summary.test.ts` covers each aggregate plus a cross-workspace isolation case.
 
 ## Payment webhooks
 

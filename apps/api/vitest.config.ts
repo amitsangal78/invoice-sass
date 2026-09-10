@@ -14,7 +14,6 @@ export default defineConfig({
       // invoice_saas_test database on the same instance — not Docker.
       DATABASE_URL: 'postgres://amitsangal:welcome%40123@localhost:5435/invoice_saas_test',
       REDIS_URL: 'redis://localhost:6379',
-      MEMCACHED_SERVERS: 'localhost:11211',
       JWT_ACCESS_SECRET: 'test-access-secret-do-not-use-in-prod',
       JWT_REFRESH_PEPPER: 'test-refresh-pepper-do-not-use-in-prod',
     },

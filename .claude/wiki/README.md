@@ -7,7 +7,7 @@ Current-state system reference, meant to be read **before** changing code in a d
 | Page | Covers |
 |---|---|
 | [identity-and-rbac.md](identity-and-rbac.md) | Auth, JWT, workspace membership, RBAC, invitations |
-| [core-invoicing.md](core-invoicing.md) | Clients, invoices, payments, status machine, reminders, PDF/Memcached |
+| [core-invoicing.md](core-invoicing.md) | Clients, invoices, payments, status machine, reminders, PDF caching |
 | [client-portal.md](client-portal.md) | Magic-link auth, client-facing routes, isolation |
 | [subscription-billing.md](subscription-billing.md) | Plans, plan limits, subscription webhooks |
 | [infrastructure.md](infrastructure.md) | Local dev topology — ports, env vars, the multi-Postgres story |

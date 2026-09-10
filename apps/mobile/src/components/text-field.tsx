@@ -1,10 +1,12 @@
 import { View, Text, TextInput, type TextInputProps, StyleSheet } from 'react-native';
 import { colors } from '../lib/tokens';
 
-export function TextField({ label, ...props }: TextInputProps & { label: string }) {
+// `label` is optional: inside the line-item rows the caption sits above the
+// pair of fields, so an empty label row would just add dead space.
+export function TextField({ label, ...props }: TextInputProps & { label?: string }) {
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput style={styles.input} placeholderTextColor={colors.textMuted} {...props} />
     </View>
   );

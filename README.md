@@ -8,7 +8,7 @@ This is a monorepo built spec-first (see [Methodology](#methodology) below) — 
 
 | App | Path | Stack | Who uses it |
 |---|---|---|---|
-| API | [`apps/api`](apps/api/README.md) | Node 22, Express, Drizzle/Postgres, Redis, Memcached | Backs all three clients below |
+| API | [`apps/api`](apps/api/README.md) | Node 22, Express, Drizzle/Postgres, Redis | Backs all three clients below |
 | Web | [`apps/web`](apps/web/README.md) | Next.js 15 (App Router) | Business owners/staff (`ADMIN`, `MEMBER`) |
 | Mobile | [`apps/mobile`](apps/mobile/README.md) | React Native / Expo Router | Same tenant users, on the go |
 | Admin | [`apps/admin`](apps/admin/README.md) | React 19 + Vite | Platform staff (`SUPER_ADMIN`, `SUPPORT_ADMIN`) |
@@ -37,13 +37,13 @@ Full requirements/design/task breakdown for each of these four areas lives under
 
 ## Running everything locally
 
-Prerequisites: Node 22+, pnpm 10, a local Postgres, Redis, and Memcached (Docker Compose files are provided in `infra/docker/`, or point at any instances you already run — e.g. `brew install redis memcached`).
+Prerequisites: Node 22+, pnpm 10, a local Postgres and Redis (Docker Compose files are provided in `infra/docker/`, or point at any instances you already run).
 
 ```bash
 pnpm install
 
 # apps/api needs a .env — see apps/api/README.md for every variable.
-# Minimum: DATABASE_URL, REDIS_URL, MEMCACHED_SERVERS, JWT_ACCESS_SECRET, JWT_REFRESH_PEPPER
+# Minimum: DATABASE_URL, REDIS_URL, JWT_ACCESS_SECRET, JWT_REFRESH_PEPPER
 
 pnpm --filter @invoice-saas/db db:migrate   # apply the schema
 pnpm --filter @invoice-saas/api seed:demo   # one demo account per role, see below
@@ -98,12 +98,9 @@ Beyond the spec-driven workflow above, this repo carries a small set of tools ai
 
 | | What it is | Where |
 |---|---|---|
-| **Memcached** | A second, long-TTL (up to 15 days) cache tier alongside Redis's short-TTL one — currently backs cached invoice PDF downloads | `apps/api/src/lib/memcache.ts`, `.claude/steering/tech.md`'s Memcached conventions |
 | **OpenWiki** | A current-state system wiki — one page per domain, meant to be read *before* an AI agent (or a person) changes code in that area | [`.claude/wiki/`](.claude/wiki/README.md) |
 | **Graphify** | A compact, hand-authored functionality graph — what depends on/is consumed by what, across domains — so a cross-cutting change doesn't require re-reading the whole repo | [`.claude/graph/functionality-graph.md`](.claude/graph/functionality-graph.md) |
 | **Mistakes log** | A running list of real bugs hit during this build (root cause, fix, how to avoid it again) | [`.claude/wiki/mistakes.md`](.claude/wiki/mistakes.md) |
-
-**Memcached** — pros: real 15-day durability that survives an app restart (unlike an in-process cache), purpose-built for "immutable once created" content instead of stretching Redis's TTL semantics for a different access pattern, offloads Redis rather than growing its memory footprint with long-lived binary blobs. Cons: one more moving part to run and monitor locally and in production, a second cache-invalidation surface to reason about correctly (mitigated here by only caching content that's provably immutable — see `tech.md`), and at this project's current scale the win over "just extend Redis's TTL ceiling" is real but not dramatic — it earns its place because there's a genuine immutable-content use case (finalized invoice PDFs), not by default.
 
 **OpenWiki** — pros: a fresh AI session (or a new team member) gets accurate current-state context in a few short pages instead of re-deriving it from the whole codebase every time; separates "how it works now" from `.claude/specs/`'s "why it was decided," so neither doc has to do both jobs. Cons: it's maintained documentation, not generated — it will drift if changes land without updating it (mitigated by `.claude/rules/ai-context-workflow.md` making the update step part of the workflow, not optional), and it's genuinely more pages to keep honest as the codebase grows.
 
@@ -117,6 +114,11 @@ Documented plainly rather than hidden — see each app's own README for specific
 
 - Email sending and file storage (S3) are stubbed (console.log / not yet wired to a provider) pending real credentials.
 - Payment/subscription provider checkout flows are implemented up to webhook handling; initiating a live checkout session needs real Razorpay/Stripe API keys.
-- `apps/mobile` is code-complete and type-checks but has not been visually verified in a running simulator (see `apps/mobile/README.md` for why).
+- `apps/mobile` runs and its Home screen is verified against live data; the Invoice List and Create Invoice screens are written and type-check but haven't been seen rendering (see `apps/mobile/README.md`). Android hasn't been run at all.
 - The client-portal frontend (backend is complete) isn't built yet.
+- `packages/ui` and `packages/email-templates` are empty package shells, though several docs describe `packages/ui` as the shared component library — `apps/web` and `apps/admin` each hand-roll their own copies instead.
+- `users` has no name column, so the dashboard greets without one; `workspaces` has no business-profile fields (address, tax id, logo, default currency), which leaves the `customBranding` plan gate with nothing to gate.
+- Receipt numbers come from an in-memory counter (`services/invoicing/receipts.ts`) — they reset on restart and aren't workspace-scoped. Known bug, not yet fixed.
+- Dark mode is web-only; `apps/mobile` is light-only.
+- No frontend tests anywhere — all 122 tests are backend.
 - No CI/CD pipeline or production deployment (Neon/AWS) configured yet.

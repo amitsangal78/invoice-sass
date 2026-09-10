@@ -4,7 +4,7 @@ Node 22 + Express REST API — the single backend behind `apps/web`, `apps/admin
 
 ## Stack
 
-Express 4, Drizzle ORM over PostgreSQL, Redis (`ioredis`) for short-TTL caching/rate-limiting, Memcached (`memjs`) for long-TTL caching (up to 15 days — see `.claude/steering/tech.md`'s Memcached conventions), BullMQ for scheduled jobs (reminder emails, stale-invitation cleanup), self-built JWT auth (Argon2 password hashing, access + rotating refresh tokens with reuse detection — no Cognito/Auth0), Zod for request validation (schemas shared with the frontends via `packages/types`), `decimal.js` for all money math, `pdfkit` for invoice PDFs, `node:crypto` for Razorpay/Stripe webhook HMAC verification (no provider SDK dependency).
+Express 4, Drizzle ORM over PostgreSQL, Redis (`ioredis`) for caching and rate-limiting, BullMQ for scheduled jobs (reminder emails, stale-invitation cleanup), self-built JWT auth (Argon2 password hashing, access + rotating refresh tokens with reuse detection — no Cognito/Auth0), Zod for request validation (schemas shared with the frontends via `packages/types`), `decimal.js` for all money math, `pdfkit` for invoice PDFs, `node:crypto` for Razorpay/Stripe webhook HMAC verification (no provider SDK dependency).
 
 ## Environment variables
 
@@ -13,7 +13,6 @@ Copy this into `apps/api/.env` (gitignored — never commit real secrets):
 ```bash
 DATABASE_URL=postgres://user:password@localhost:5432/invoice_saas_dev
 REDIS_URL=redis://localhost:6379
-MEMCACHED_SERVERS=localhost:11211
 JWT_ACCESS_SECRET=<32+ random bytes, e.g. `openssl rand -base64 32`>
 JWT_REFRESH_PEPPER=<32+ random bytes, mixed into refresh-token hashing>
 PORT=4000
@@ -24,8 +23,6 @@ STRIPE_WEBHOOK_SECRET=<from your Stripe dashboard, once live>
 Validated on boot by `src/lib/env.ts` (`getEnv()`) — the process refuses to start with a missing/invalid value rather than falling back silently. `NODE_ENV` defaults to `development`; the two webhook secrets default to test placeholders if unset, but everything else is required.
 
 If you have more than one Postgres instance on your machine (Docker, a system install, Homebrew, etc.), double-check `DATABASE_URL`'s port — this is the most common cause of "API runs but writes go nowhere I expect." (See `.claude/wiki/infrastructure.md` if this project's dev machine ended up with more than one Postgres install — it has, more than once.)
-
-Memcached needs to actually be running for the PDF-download route below to work (falls through to regenerating on every request if it isn't, per its degrade-to-source-of-truth contract — never a hard failure): `brew install memcached && brew services start memcached`, or `docker compose -f ../../infra/docker/docker-compose.yml up -d memcached`.
 
 ## Running
 
@@ -53,7 +50,7 @@ Routes live in `src/routes/`, thin by convention — parse/validate → call one
 
 - `auth.ts` — signup, login, refresh, logout, email verification, password reset
 - `workspaces.ts`, `invitations.ts` — workspace CRUD, membership, invites
-- `clients.ts`, `invoices.ts` — core invoicing, including `GET /invoices/:id/pdf` (Memcached-cached, 15-day TTL, only for non-`DRAFT` invoices)
+- `clients.ts`, `invoices.ts` — core invoicing, including `GET /invoices/:id/pdf` (Redis-cached for 15 days — safe because a sent invoice is immutable; only for non-`DRAFT` invoices)
 - `billing.ts`, `subscription-webhooks.ts` — plan limits, subscription lifecycle (kept separate from `webhooks.ts` — the subscription path must never touch invoice/payment state)
 - `webhooks.ts` — Razorpay/Stripe payment webhooks, signature-verified and idempotent
 - `portal.ts`, `portal-auth.ts` — client-portal endpoints, fully separate auth middleware chain from tenant auth

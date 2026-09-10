@@ -2,7 +2,6 @@ import { afterAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { db, closeDb } from '@invoice-saas/db';
 import { closeRedis, getRedis } from '../lib/redis';
-import { closeMemcache, getMemcache } from '../lib/memcache';
 
 // Real Dockerized test Postgres — no mocked DB layer (rules/testing.md).
 // TRUNCATE ... CASCADE between every test keeps each test's data isolated
@@ -35,11 +34,9 @@ const TABLES = [
 beforeEach(async () => {
   await db.execute(sql.raw(`TRUNCATE TABLE ${TABLES.join(', ')} RESTART IDENTITY CASCADE`));
   await getRedis().flushdb();
-  await getMemcache().flush();
 });
 
 afterAll(async () => {
   await closeDb();
   await closeRedis();
-  closeMemcache();
 });

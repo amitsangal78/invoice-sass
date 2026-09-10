@@ -21,9 +21,11 @@ xcrun simctl openurl booted "exp://127.0.0.1:8081"
 
 ## Verification status
 
-**Verified running on an iOS simulator (iPhone 15 Pro):** the app boots, the login screen renders, and Metro reports no runtime errors. `tsc --noEmit` is clean.
+**Verified running on an iOS simulator (iPhone 15 Pro)** and on the Expo **web** target: the app boots, login works against the real API, and the Home screen renders live data (outstanding/overdue totals, recent payments). `tsc --noEmit` and `eslint` are clean.
 
-Not yet verified: the authenticated flows past login (dashboard, invoice list/detail/create, clients) have not been exercised on a device — they're implemented against the same API contract the web app uses successfully, but nobody has tapped through them. Android has not been run at all.
+The web target working is itself notable — it was the surface previously blamed for the crash described below.
+
+Not yet verified: the **Invoice List** and **Create Invoice** screens. Both typecheck and lint, and both read the same API the verified Home screen uses — but neither has been seen rendering. Driving the simulator needs macOS Accessibility permission (not granted here), and on the web target expo-router changes the URL without swapping the tab screen. Android has not been run at all.
 
 ## History worth knowing
 

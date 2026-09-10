@@ -4,7 +4,7 @@ Next.js 15 (App Router) — the tenant-facing dashboard used by workspace `ADMIN
 
 ## Stack
 
-React Server Components + Server Actions (no client-side API calls for mutations — auth tokens live in httpOnly cookies set directly by Server Actions via `cookies().set()`, never exposed to client JS). Tailwind CSS with the design-system's CSS-variable tokens (light/dark/primary themes — no hardcoded colors, no hand-rolled dark-mode variants). Shared UI components from `packages/ui` (shadcn/ui-based). TanStack Query for server-state caching, Zustand for client-only UI state. Every form validates against the same Zod schema the API uses, imported from `packages/types`.
+React Server Components + Server Actions (no client-side API calls for mutations — auth tokens live in httpOnly cookies set directly by Server Actions via `cookies().set()`, never exposed to client JS). Tailwind CSS with the design-system's CSS-variable tokens. **Dark mode is live** — the class is stamped pre-paint in `app/layout.tsx` (no flash), toggled from the topbar, and persisted; because components reference tokens rather than literals, one implementation covers both themes. Inter is loaded via `next/font`. Shared UI components from `packages/ui` (shadcn/ui-based). TanStack Query for server-state caching, Zustand for client-only UI state. Every form validates against the same Zod schema the API uses, imported from `packages/types`.
 
 ## Structure
 
@@ -27,7 +27,7 @@ Log in with a seeded demo account (see root README) — `admin@billify.dev` / `D
 
 ## What's built
 
-Marketing page, login/signup, workspace picker, dashboard, clients (list/create), invoices (list/create with dynamic line items, detail view, send/mark-paid/cancel actions, PDF download for non-draft invoices). Verified end-to-end against a live backend: signup → login → create client → create/send/pay an invoice → download its PDF → dashboard totals, all confirmed rendering real data via `curl` with real session cookies.
+Marketing page, login/signup (split-screen brand layout), workspace picker, a full dashboard (sidebar, topbar, four stat cards, recent-invoices table, revenue trend, recent payments), clients (list/create), invoices (list/create with dynamic line items, detail view, send/mark-paid/cancel actions, PDF download for non-draft invoices). Verified end-to-end against a live backend: signup → login → create client → create/send/pay an invoice → download its PDF → dashboard totals, all confirmed rendering real data via `curl` with real session cookies.
 
 ## Known gaps
 
