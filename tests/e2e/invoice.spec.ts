@@ -1,0 +1,67 @@
+import {test,expect} from '@playwright/test';
+import {randomBytes,randomUUID} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import {loadEnvFile} from 'node:process';
+import {createDatabase} from '../../packages/database/src/index';
+import {hashPassword,unseal} from '../../packages/database/src/crypto';
+
+// Synthetic local fixtures only. Account email verification has separate UI coverage.
+test('platform approval, invoice issuance, customer PDF and payment work together',async({page,browser})=>{
+  test.setTimeout(90_000);loadEnvFile('.env');
+  const target=new URL(process.env.MIGRATION_DATABASE_URL!);
+  if(!['localhost','127.0.0.1'].includes(target.hostname)||target.pathname!=='/invoice_dev')throw Error('Browser workflow fixtures require local invoice_dev');
+  const db=createDatabase(target.toString());
+  const suffix=Date.now(),email=`journey-${suffix}@example.test`,password=randomBytes(24).toString('base64url');
+  const adminEmail=`journey-admin-${suffix}@example.test`,adminId=randomUUID();
+  const adminContext=await browser.newContext(),customerContext=await browser.newContext();
+  try{
+    const signup=await page.request.post('/api/v1/auth/signup',{headers:{Origin:'http://localhost:3000','Idempotency-Key':randomUUID()},data:{email,password}});
+    expect(signup.status()).toBe(201);const registered=(await signup.json()).data;
+    await db.query('UPDATE users SET email_verified_at=now() WHERE id=$1',[registered.user_id]);
+    await db.query('INSERT INTO users(id,email,password_hash,email_verified_at) VALUES($1,$2,$3,now())',[adminId,adminEmail,await hashPassword(password)]);
+    await db.query('INSERT INTO platform_owners(user_id) VALUES($1)',[adminId]);
+    await page.goto('/');await page.getByRole('button',{name:'Onboarding & Profile',exact:true}).click();
+    for(const [name,value] of Object.entries({bName:'Browser Journey Business',bEmail:email,bLine1:'1 Browser Street',bCity:'Delhi',bState:'DL',bPostal:'110001'}))await page.locator(`input[name="${name}"]`).fill(value);
+    await page.getByRole('button',{name:/Submit for Review/}).click();
+    await expect(page.getByText('Profile updated and submitted for platform review!',{exact:true})).toBeVisible();
+    const adminPage=await adminContext.newPage();await adminPage.goto('http://localhost:3000');
+    await adminPage.getByLabel('Email address').fill(adminEmail);await adminPage.getByLabel('Password',{exact:true}).fill(password);
+    await adminPage.getByRole('button',{name:'Sign in to workspace'}).click();
+    await adminPage.getByRole('button',{name:/Pending Reviews/}).click();
+    await adminPage.getByRole('row').filter({hasText:registered.vendor_id}).getByRole('button',{name:'Approve',exact:true}).click();
+    await adminPage.getByRole('button',{name:'Approve request',exact:true}).click();
+    await expect(adminPage.getByText('Request approved.',{exact:true})).toBeVisible();
+    const origin={Origin:'http://localhost:3000'};
+    const customer=await page.request.post('/api/v1/customers',{headers:origin,data:{name:'Browser Journey Customer',email:`customer-${suffix}@example.test`,address:{line1:'2 Street',city:'Delhi',state_code:'DL',postal_code:'110001',country_code:'IN'}}});
+    expect(customer.status()).toBe(201);
+    const item=await page.request.post('/api/v1/catalogue-items',{headers:origin,data:{name:'Browser Journey Service',item_type:'SERVICE',unit:'hour',unit_price:100}});expect(item.status()).toBe(201);
+    await page.reload();await page.getByRole('button',{name:/^Invoices \(/}).click();
+    await page.getByRole('button',{name:'+ Prepare Invoice',exact:true}).click();
+    const modal=page.locator('.modal-box');
+    await modal.getByLabel('Select Customer').selectOption((await customer.json()).data.id);
+    await modal.getByLabel('Invoice item 1').selectOption((await item.json()).data.id);
+    await modal.getByRole('button',{name:'Create Invoice Draft'}).click();
+    await expect(page.getByRole('button',{name:'Submit for review',exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'Issue Invoice',exact:true}).click();
+    await expect(page.getByText('Invoice issued successfully!',{exact:true})).toBeVisible();
+    const invoices=(await(await page.request.get('/api/v1/invoices')).json()).data;
+    const invoice=invoices[0];
+    const delivery=(await db.query("SELECT id,encrypted_payload FROM outbox_jobs WHERE kind='EMAIL' AND payload->>'invoice_id'=$1",[invoice.id])).rows[0];
+    const message=async(row:any)=>row.encrypted_payload?unseal(row.encrypted_payload,process.env.DELIVERY_KEY!):JSON.parse(await readFile(`.local/mail/${row.id}.json`,'utf8'));
+    const token=((await message(delivery)) as {link_token:string}).link_token;
+    const customerPage=await customerContext.newPage();await customerPage.goto(`http://localhost:3000/pay/${token}`);
+    await customerPage.getByRole('button',{name:/Send Verification Code/}).click();
+    await expect(customerPage.getByRole('heading',{name:'Enter Code'})).toBeVisible();
+    const challenge=(await db.query("SELECT j.id,j.encrypted_payload FROM outbox_jobs j JOIN otp_challenges c ON j.payload->>'challenge_id'=c.id::text JOIN invoice_access_links l ON c.access_link_id=l.id WHERE l.invoice_id=$1 ORDER BY c.created_at DESC LIMIT 1",[invoice.id])).rows[0];
+    const code=((await message(challenge)) as {code:string}).code;
+    await customerPage.getByPlaceholder('000000').fill(code);await customerPage.getByRole('button',{name:/Open Invoice/}).click();
+    await expect(customerPage.getByText('Browser Journey Service',{exact:true})).toBeVisible();
+    await expect.poll(async()=>(await customerPage.request.get('/api/v1/customer/invoice/document/content')).status(),{timeout:20_000}).toBe(200);
+    const pdf=await customerPage.request.get('/api/v1/customer/invoice/document/content');expect((await pdf.body()).subarray(0,5).toString()).toBe('%PDF-');
+    await customerPage.getByRole('button',{name:/Simulate Pay/}).click();
+    await expect(customerPage.getByRole('heading',{name:'Payment Confirmed'})).toBeVisible();
+    const paid=(await(await customerPage.request.get('/api/v1/customer/invoice')).json()).data;expect(paid.outstanding_amount).toBe(0);
+    const receipts=(await(await page.request.get('/api/v1/receipts')).json()).data;expect(receipts).toHaveLength(1);
+    await customerPage.screenshot({path:'.local/screenshots/invoice-payment-confirmed.png',fullPage:true});
+  }finally{await adminContext.close();await customerContext.close();await db.end();}
+});

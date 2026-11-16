@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: invoice_admin
+      POSTGRES_PASSWORD: invoice_dev_only
+      POSTGRES_DB: invoice_dev
+    ports:
+      - "127.0.0.1:5440:5432"
+    volumes:
+      - invoice_pg:/var/lib/postgresql
+      - ./infra/local-init.sql:/docker-entrypoint-initdb.d/00-local-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invoice_admin -d invoice_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  ses:
+    image: localstack/localstack:latest
+    profiles: [mail]
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      SERVICES: ses,sesv2
+      AWS_DEFAULT_REGION: ${AWS_REGION:-ap-southeast-1}
+      SES_LOCAL_FROM_EMAIL: ${SES_LOCAL_FROM_EMAIL:-invoices@local.example}
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - ./infra/localstack/01-ses.sh:/etc/localstack/init/ready.d/01-ses.sh:ro
+
+volumes:
+  invoice_pg:

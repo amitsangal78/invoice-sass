@@ -1,0 +1,25 @@
+{
+  "name": "@invoice/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "start": "tsx --env-file=../../.env src/server.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@invoice/contracts": "*",
+    "@invoice/database": "*",
+    "express": "^5.1.0",
+    "helmet": "^8.0.0",
+    "zod": "^4.0.0",
+    "@invoice/email": "*",
+    "@invoice/documents": "*"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.0.0"
+  }
+}
